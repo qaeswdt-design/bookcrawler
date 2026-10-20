@@ -12,6 +12,7 @@ license = { text = "MIT" }
 dependencies = [
     "requests>=2.28",
     "beautifulsoup4>=4.11",
+    "charset-normalizer>=2",   # requests 本來就會裝；這裡直接用來偵測 Big5／GB18030
 ]
 
 [project.optional-dependencies]

@@ -62,10 +62,14 @@ class WikisourceAdapter(SiteAdapter):
 
         key = self._book_title(url)
         prefix = f"/wiki/{key.replace(' ', '_')}/"
+        host = urlsplit(url).netloc
         chapters, seen = [], set()
         for a in body.find_all("a", href=True):
             full = urljoin(url, a["href"]).split("#")[0]
-            if not unquote(urlsplit(full).path).startswith(prefix) or full in seen:
+            parts = urlsplit(full)
+            if parts.netloc != host:   # 只收同一個網站的章節，避免被頁面上的外部連結帶走
+                continue
+            if not unquote(parts.path).startswith(prefix) or full in seen:
                 continue
             title = _clean(a.get_text())
             if not title:
