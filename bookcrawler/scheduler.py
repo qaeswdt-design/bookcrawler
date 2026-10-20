@@ -1,4 +1,8 @@
-"""背景排程：一次一本依序抓，佇列存檔，下次開程式自動接續"""
+"""背景排程：一次一本依序抓，佇列存檔，下次開程式自動接續
+
+沒抓完的書（被擋、網站錯誤）留在排程裡並標記為失敗，不會自動重試，
+避免對擋住我們的網站一直重複請求。要重試就再貼一次同網址，或用 retry_failed()。
+"""
 
 import queue
 import threading
@@ -19,7 +23,9 @@ class Scheduler:
         self.stop_event = stop_event
         self.log = log
         self._lock = threading.Lock()
+        self._save_lock = threading.Lock()   # 主執行緒和背景都會存檔，共用同一個暫存檔，要排隊
         self._pending: list[dict] = []
+        self._failed: set[str] = set()   # 處理過但沒完成、目前不在佇列裡的網址
         self._queue: queue.Queue[dict] = queue.Queue()
         self._thread: threading.Thread | None = None
 
@@ -30,19 +36,38 @@ class Scheduler:
         return len(self._pending)
 
     def add(self, url: str, name: str = "", save: bool = True) -> bool:
+        """加入排程。已經在排程中：之前失敗的會重新排入（回傳 True），還在排隊的略過（回傳 False）"""
         with self._lock:
-            if any(t["url"] == url for t in self._pending):
-                return False
-            task = {"url": url, "name": name}
-            self._pending.append(task)
+            existing = next((t for t in self._pending if t["url"] == url), None)
+            if existing is not None:
+                if url not in self._failed:
+                    return False
+                self._failed.discard(url)
+                task, changed = existing, False   # 排程內容沒變，不用存檔
+            else:
+                task, changed = {"url": url, "name": name}, True
+                self._pending.append(task)
         self._queue.put(task)
-        if save:
+        if save and changed:
             self._save()
         return True
 
     def pending(self) -> list[dict]:
         with self._lock:
             return list(self._pending)
+
+    def failed(self) -> set[str]:
+        with self._lock:
+            return set(self._failed)
+
+    def retry_failed(self) -> int:
+        """把所有失敗的書重新排入佇列，回傳本數"""
+        with self._lock:
+            tasks = [t for t in self._pending if t["url"] in self._failed]
+            self._failed.clear()
+        for task in tasks:
+            self._queue.put(task)
+        return len(tasks)
 
     def start(self):
         self._thread = threading.Thread(target=self._work, daemon=True)
@@ -58,7 +83,8 @@ class Scheduler:
         self._queue.join()
 
     def _save(self):
-        save_json(self.queue_file, self.pending())
+        with self._save_lock:
+            save_json(self.queue_file, self.pending())
 
     def _remove(self, task: dict):
         with self._lock:
@@ -84,6 +110,10 @@ class Scheduler:
                 self.log(f"《{task['name'] or task['url']}》發生未預期的錯誤：{type(e).__name__}: {e}")
             if finished:
                 self._remove(task)
+            elif not self.stop_event.is_set():
+                with self._lock:
+                    self._failed.add(task["url"])
+                self.log("  要重試這本：輸入 retry，或再貼一次同一個網址")
             self._queue.task_done()
             if self._queue.empty() and not self.stop_event.is_set():
                 self.log("排程中的書都處理過了，可以繼續輸入新的")

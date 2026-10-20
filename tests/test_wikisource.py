@@ -52,6 +52,14 @@ class ParseTests(unittest.TestCase):
         self.assertTrue(book.chapters[0].url.endswith("/wiki/%E8%A5%BF%E9%81%8A%E8%A8%98/%E7%AC%AC001%E5%9B%9E"))
         self.assertEqual(len({c.url for c in book.chapters}), 101, "章節網址不應重複")
 
+    def test_toc_ignores_links_to_other_hosts(self):
+        html = """<h1>西遊記</h1><div id="mw-content-text">
+          <a href="/wiki/西遊記/第001回">第一回</a>
+          <a href="https://evil.example/wiki/西遊記/第002回">第二回</a>
+        </div>"""
+        book = self.adapter.parse_toc(html, TOC_URL)
+        self.assertEqual([c.title for c in book.chapters], ["第一回"])
+
     def test_parse_chapter(self):
         link = ChapterLink("第一回", "https://zh.wikisource.org/wiki/西遊記/第001回")
         chapter = self.adapter.parse_chapter(sample("wikisource_chapter.html"), link.url, link)

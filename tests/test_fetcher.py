@@ -22,6 +22,14 @@ class DecodeTests(unittest.TestCase):
         self.assertEqual(decode_html(text.encode("gb18030")), text)
         self.assertEqual(decode_html(text.encode("big5"), "big5"), text)
 
+    def test_undeclared_big5_and_gbk(self):
+        # Big5 的位元組幾乎都是合法 GB18030，沒有自動偵測的話 Big5 會被誤解成亂碼
+        big5 = "這是一段台灣小說網站常見的繁體中文內容，主角走進了古老的圖書館。"
+        gbk = "这是一段大陆小说网站常见的简体中文内容，主角走进了古老的图书馆。"
+        self.assertEqual(decode_html(big5.encode("big5")), big5)
+        self.assertEqual(decode_html(gbk.encode("gbk")), gbk)
+        self.assertEqual(decode_html("第一章　天下大勢".encode("big5")), "第一章　天下大勢")
+
     def test_meta_charset_beats_guessing(self):
         html = '<meta charset="gbk"><p>天下</p>'
         self.assertIn("天下", decode_html(html.encode("gbk")))
@@ -57,6 +65,14 @@ class FetchTests(unittest.TestCase):
         with self.assertRaises(FetchError):
             make_fetcher(max_retry=2).get(self.site.base + "/down")
         self.assertEqual(self.site.hits["/down"], 3)
+
+    def test_retry_after_capped(self):
+        self.site.route("/slow", (503, {"Retry-After": "86400"}, "busy"), "<p>ok</p>")
+        waits = []
+        f = make_fetcher(retry_wait_max=0)
+        f._sleep = waits.append
+        self.assertEqual(f.get(self.site.base + "/slow"), "<p>ok</p>")
+        self.assertEqual(max(waits), 0, "網站要求等一整天也不應該超過 retry_wait_max")
 
     def test_challenge_stops_without_retry(self):
         self.site.route("/cf", (403, {"cf-mitigated": "challenge"}, "<title>Just a moment...</title>"))

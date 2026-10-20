@@ -1,7 +1,7 @@
 """命令列介面
 
   python -m bookcrawler 網址 [--name 書名]     抓一本（前景執行，Ctrl+C 暫停）
-  python -m bookcrawler                          互動模式：貼網址加入排程，list 看排程，q 離開
+  python -m bookcrawler                          互動模式：貼網址加入排程，list 看排程，retry 重試失敗的書，q 離開
   python -m bookcrawler --sites                  列出支援的網站
 """
 
@@ -19,7 +19,7 @@ from .scheduler import Scheduler
 from .sites import all_adapters, find_adapter, load_plugins
 from .storage import Storage, make_converter
 
-DEFAULT_UA = f"bookcrawler/{__version__} (personal archiving tool; +https://github.com/YOUR_NAME/bookcrawler)"
+DEFAULT_UA = f"bookcrawler/{__version__} (personal archiving tool; +https://github.com/qaeswdt-design/bookcrawler)"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -96,7 +96,7 @@ def interactive(run, stop_event: threading.Event, queue_file: Path) -> int:
     if n := scheduler.restore():
         print(f"已接續上次未完成的排程 {n} 本")
     scheduler.start()
-    print("輸入：網址 [書名]　指令：list 查看排程　q 離開")
+    print("輸入：網址 [書名]　指令：list 查看排程　retry 重試失敗的書　q 離開")
 
     while True:
         try:
@@ -111,9 +111,15 @@ def interactive(run, stop_event: threading.Event, queue_file: Path) -> int:
             print("已離開，未完成的書下次開啟會自動接續")
             return 0
         if line.lower() == "list":
-            items = scheduler.pending()
+            items, failed = scheduler.pending(), scheduler.failed()
             print("排程是空的" if not items else "\n".join(
-                f"  {i}. {t['name'] or '（自動抓書名）'}  {t['url']}" for i, t in enumerate(items, 1)))
+                f"  {i}. {t['name'] or '（自動抓書名）'}  {t['url']}"
+                + ("　（失敗，可用 retry 重試）" if t["url"] in failed else "")
+                for i, t in enumerate(items, 1)))
+            continue
+        if line.lower() == "retry":
+            n = scheduler.retry_failed()
+            print(f"已重新排入 {n} 本" if n else "沒有失敗的書")
             continue
         for one in line.splitlines():   # 一次貼上多行時逐行加入
             parts = one.strip().split(maxsplit=1)
@@ -123,9 +129,9 @@ def interactive(run, stop_event: threading.Event, queue_file: Path) -> int:
             if find_adapter(url) is None:
                 print(f"不支援這個網站：{url}")
             elif scheduler.add(url, name):
-                print(f"已加入排程（目前 {len(scheduler.pending())} 本）")
+                print(f"已排入（目前排程 {len(scheduler.pending())} 本）")
             else:
-                print("這本已經在排程中")
+                print("這本已經在排程中，正在排隊")
 
 
 if __name__ == "__main__":
