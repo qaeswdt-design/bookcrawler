@@ -30,10 +30,22 @@ CHALLENGE_MARKERS = (
 META_CHARSET = re.compile(rb'<meta[^>]+charset=["\']?([\w-]+)', re.IGNORECASE)
 
 
+def detect_encoding(content: bytes) -> str | None:
+    """用 charset_normalizer（requests 的相依套件，也是 resp.apparent_encoding 背後用的）猜編碼"""
+    try:
+        from charset_normalizer import from_bytes
+    except ImportError:
+        return None
+    best = from_bytes(content).best()
+    return best.encoding if best else None
+
+
 def decode_html(content: bytes, declared: str | None = None) -> str:
-    """依序嘗試：HTTP 標頭宣告的編碼 → <meta charset> → utf-8 → gb18030 → big5
+    """依序嘗試：HTTP 標頭宣告的編碼 → <meta charset> → utf-8 → 自動偵測 → gb18030 → big5
 
     沒宣告編碼時 requests 會預設 ISO-8859-1，中文網頁幾乎都不是，所以忽略它。
+    Big5 的位元組組合幾乎都是合法的 GB18030，固定清單永遠輪不到 big5，
+    所以沒宣告時要先自動偵測，固定清單只當最後的備案。
     """
     candidates = []
     if declared and declared.lower() != "iso-8859-1":
@@ -41,8 +53,14 @@ def decode_html(content: bytes, declared: str | None = None) -> str:
     m = META_CHARSET.search(content[:4096])
     if m:
         candidates.append(m.group(1).decode("ascii", "ignore"))
-    candidates += ["utf-8", "gb18030", "big5"]
+    candidates.append("utf-8")   # utf-8 的格式很嚴格，解得開幾乎就是它，不用偵測
     for enc in candidates:
+        try:
+            return content.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    detected = detect_encoding(content)
+    for enc in ([detected] if detected else []) + ["gb18030", "big5"]:
         try:
             return content.decode(enc)
         except (UnicodeDecodeError, LookupError):
@@ -141,8 +159,8 @@ class Fetcher:
 
             if attempt == self.max_retry:
                 raise FetchError(f"重試 {self.max_retry} 次仍失敗（{problem}）：{url}")
-            wait = retry_after if retry_after is not None else \
-                min(self.retry_wait * 2 ** attempt, self.retry_wait_max)
+            wait = retry_after if retry_after is not None else self.retry_wait * 2 ** attempt
+            wait = min(wait, self.retry_wait_max)   # 網站要求等太久（例如一整天）也不會卡住
             self.log(f"  {problem}，{wait:.0f} 秒後第 {attempt + 1}/{self.max_retry} 次重試")
             self._sleep(wait)
 
