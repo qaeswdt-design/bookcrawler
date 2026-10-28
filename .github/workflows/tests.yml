@@ -3,6 +3,7 @@ name: tests
 on:
   push:
   pull_request:
+  workflow_dispatch:   # 可在 Actions 頁面手動執行
 
 jobs:
   test:
