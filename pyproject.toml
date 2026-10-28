@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bookcrawler"
+version = "0.1.0"
+description = "可擴充、有禮貌的書籍爬蟲：限速、遵守 robots.txt、斷點續抓、轉接器架構"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.28",
+    "beautifulsoup4>=4.11",
+]
+
+[project.optional-dependencies]
+opencc = ["opencc>=1.1"]
+
+[project.scripts]
+bookcrawler = "bookcrawler.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["bookcrawler*"]
